@@ -808,14 +808,16 @@ async function fillFromPhoto(form, file) {
     const it = items[0], cur = readItem(form), editing = !!form.dataset.id;
     if (!editing) queue = [...items.slice(1), ...queue];  // 앞 사진에서 남아 있던 제품은 뒤에 그대로
     const name = cur.name || it.name, kind = cur.kind !== 'etc' && (editing || cur.name) ? cur.kind : it.kind !== 'etc' ? it.kind : cur.kind;
-    itemForm({ ...cur, name, kind, tags: [...new Set([...cur.tags, ...it.tags])], expiry: it.expiry || cur.expiry, dose: cur.dose || it.dose }, !editing);
+    const expiry = it.expiry || cur.expiry, dose = cur.dose || it.dose;
+    itemForm({ ...cur, name, kind, tags: [...new Set([...cur.tags, ...it.tags])], expiry, dose }, !editing);
     const found = [it.expiry && `유통기한 ${it.expiry}`, it.dose && `1회 ${it.dose}`, it.tags.length && `성분 ${it.tags.map(t => TAGS[t]).join('·')}`].filter(Boolean);
     const o = dlg.querySelector('.ai');
     o.hidden = false;
-    // 짧게: 읽은 개수 · 채운 것 · (기한이나 성분을 못 읽었을 때만) 뒷면 안내
+    // 짧게: 읽은 개수 · 채운 것 · 뒷면 안내(이 창의 기한이나 1회 섭취량 칸이 아직 비어 있을 때만 — 섭취량은 대개 뒷면에 있다. 짐작해서 채우지는 않는다)
+    const blank = [!expiry && '기한', !dose && '1회 섭취량'].filter(Boolean);
     o.textContent = (!editing && items.length > 1 ? `${items.length}개를 읽었어요 — 저장하면 다음 것이 떠요. ` : '')
-      + (found.length ? `채운 것: ${found.join(' · ')}.` : '기한·성분은 못 읽었어요.')
-      + (it.expiry && it.tags.length ? '' : ' 뒷면을 한 번 더 찍으면 빈 칸을 더 채워요.');
+      + (found.length ? `채운 것: ${found.join(' · ')}.` : '기한·섭취량·성분은 못 읽었어요.')
+      + (blank.length ? ` ${blank.join('·')}은 뒷면을 한 번 더 찍으면 채워요.` : '');
   } catch (e) { if (live()) out.textContent = e.message; }
   finally { for (const el of lock) el.disabled = false; }
 }
