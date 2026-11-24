@@ -95,6 +95,15 @@ button.what { border: 0; background: none; padding: 2px 0; min-height: 0; border
 .what .for { margin-top: 6px; color: var(--ink); font-weight: 700; }
 .acts button { min-height: 32px; padding: 4px 10px; font-size: 13px; }
 
+/* 지난 7일 */
+.week { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: center; }
+.week thead th { position: sticky; top: -20px; background: var(--card); padding: 8px 0 4px; font-size: 12px; font-weight: 400; color: var(--muted); }      /* 제품이 많아 내려도 요일이 보이게. -20px = 창(dialog)의 안쪽 여백만큼 올려 창 맨 위에 붙인다 */
+.week thead small { display: block; }
+.week thead .now, .week thead .now small { color: var(--accent); font-weight: 700; }
+.week tbody th { padding: 10px 0 0; border-top: 1px solid var(--line); text-align: left; font-size: 14px; font-weight: 600; }
+.week td { padding: 2px 0 8px; font-weight: 700; color: var(--muted); }
+.week td.on { color: var(--accent); }
+
 /* 입력 창 */
 dialog { border: 0; border-radius: 18px; padding: 20px; width: min(100vw - 24px, 480px); max-height: calc(100dvh - 24px); background: var(--card); color: var(--ink); }
 dialog::backdrop { background: rgb(0 0 0 / .5); }
@@ -196,6 +205,18 @@ function routine(items, now) {
   for (const p of items) if (!expired(p, now)) for (const t of slotsOf(p)) out[t].push(p.id);
   return out;
 }
+// 지난 7일(오늘까지) 챙긴 기록: 제품마다 날짜별로 ✓ 한 횟수 → { days: [날짜 7개, 오늘이 끝], rows: [{ p, per, n: [횟수 7개] }] }
+// 줄 = 지금 루틴에 든 제품 + 그 사이 한 번이라도 ✓ 한 제품(지금은 뺐거나 기한이 지났어도), 목록 순서. per = 하루 몇 번(지금 설정, 루틴에 없으면 0)
+// ponytail: 그날의 루틴은 남기지 않아서 「하루 몇 번」은 지금 설정으로 본다 — 그 사이 새로 등록했거나 먹는 때를 바꾼 제품은 지난 날이 비거나 일부로 보인다(창의 접힌 설명에 적는다). 맞추려면 날마다 루틴을 남겨야 한다
+function weekLog(s, now, len = 7) {
+  const days = Array.from({ length: len }, (_, i) => addDays(now, i - len + 1));
+  const rows = s.items.map(p => ({ p, per: expired(p, now) ? 0 : slotsOf(p).length, n: days.map(d => SLOT_KEYS.filter(t => s.ticks[d]?.[t].includes(p.id)).length) }))
+    .filter(r => r.per || r.n.some(Boolean));
+  return { days, rows };
+}
+// 그 표의 한 칸: [보이는 글, 읽어 줄 글] — 기록 없음 · 먹음 · 일부만(하루 두 번 이상인 제품)
+// 「안 먹음」이라 하지 않는다 — 등록하기 전이거나 루틴에서 빼 둔 날도 점으로 나온다
+const weekMark = (c, per) => (!c ? ['·', '기록 없음'] : c >= (per || 1) ? ['✓', '먹음'] : [`${c}/${per}`, `${per}번 중 ${c}번`]);
 // 남은 양(stock): "350ml"·"60정" 같은 글 한 칸. 1회 섭취량(dose)과 단위가 같으면 ✓ 할 때마다 줄이고 며칠분인지 센다 — 모르는 것은 세지 않는다
 // 글 앞의 숫자(n)와 그 뒤 글(tail)·단위(u: 숫자 바로 뒤 글자들, 소문자). 숫자로 시작하지 않으면 null
 // 천 단위 쉼표(1,000ml)는 읽고, 확실히 읽을 수 없는 모양은 null — 반 알(1/2정)·범위(1~2정)·이상한 점·쉼표(1.5.2, 12,5). 잘못 읽어 틀리게 세느니 세지 않는다
@@ -387,7 +408,7 @@ const useName = d => d.act + (d.act === 'tab' ? ':' + (d.f || d.tab) : d.act ===
 const USE_NAMES = {
   check: 'AI 검토', 'check:fresh': 'AI 검토', applyMemo: 'AI 제안 바로 적용', applyWhen: 'AI 제안 바로 적용',
   copyRoutine: '루틴 글로 복사', 'form:advice': '다른 AI 답 붙여 넣기',
-  tick: '먹었어요 체크', 'form:item:new': '제품 등록', 'form:item:edit': '제품 고치기', 'pick:item': '사진으로 제품 칸 채우기', delItem: '다 먹었어요·삭제',
+  tick: '먹었어요 체크', week: '지난 7일 기록 보기', 'form:item:new': '제품 등록', 'form:item:edit': '제품 고치기', 'pick:item': '사진으로 제품 칸 채우기', delItem: '다 먹었어요·삭제',
   'filter:out': '걸러 보기', 'filter:soon': '걸러 보기', 'filter:none': '걸러 보기', 'tab:soon': '기한 지난 제품 보러 가기', search: '제품 찾기',
   'pick:amounts': '사진으로 하루 함량 채우기', offItem: '상한 안내에서 제품 빼기', ackOver: '상한 안내 「알고 있어요」',
   export: '백업 내보내기', 'pick:backup': '백업 가져오기', vanityKey: '화장대 키 가져오기',
@@ -657,6 +678,7 @@ function viewToday() {
   }).join('');
   return notes + (cards || `<div class="empty"><p><b>오늘 루틴이 비어 있어요</b></p><p>등록한 ${state.items.length}개가 모두 「루틴에 안 넣음」이거나 기한이 지났어요.</p>
     <button class="primary" data-act="tab" data-tab="list" data-f="out">약통 보러 가기</button></div>`)
+    + '<button id="week" class="wide" data-act="week">📅 지난 7일 기록</button>'
     + (cards ? `<button id="check" class="wide" data-act="check">✨ AI 검토</button>
       <button id="copy" class="wide" data-act="copyRoutine">📋 루틴 글로 복사</button>
       <button id="paste" class="wide" data-act="pasteAdvice">📥 다른 AI 답 붙여 넣기</button>` : '');
@@ -806,6 +828,17 @@ function useHelp() {
   return help(`${md(u.since)}부터 · 앱을 연 날 ${u.n[USE_DAY]?.[0] ?? 0}일 · 쓴 기능 ${rows.length}가지 · 아직 안 쓴 ${never.length}가지`,
     `${rows.map(([name, n, last]) => `${name} <b>${n}</b>번${last ? ` · 마지막 ${md(last)}` : ''}`).join('<br>') || '아직 기록이 없어요.'}${never.length ? `<br><br><b>아직 안 쓴 것</b><br>${never.join(' · ')}` : ''}`
     + '<br><br>이 기기에서 쓴 횟수만 세요 — 제품 이름·메모 같은 내용은 담지 않고 어디로도 보내지 않아요. 백업 파일에 같이 담기지만, 가져올 때 되살리지는 않아요.');
+}
+// 지난 7일 기록 창 (weekLog) — 보기만 한다. 지난 날의 체크는 여기서 고치지 않는다
+function weekForm() {
+  const now = today(), { days, rows } = weekLog(state, now);
+  const cell = (c, per, d) => { const [mark, say] = weekMark(c, per); return `<td${c ? ' class="on"' : ''}><span aria-hidden="true">${mark}</span><span class="sr">${+d.slice(5, 7)}월 ${+d.slice(8)}일 ${say}</span></td>`; };
+  modal(`<form method="dialog"><h2>지난 7일</h2>
+    ${rows.length ? `<table class="week" aria-label="제품마다 날짜별로 먹었는지"><thead><tr>${days.map(d => `<th scope="col"${d === now ? ' class="now"' : ''}>${d === now ? '오늘' : '일월화수목금토'[local(d).getDay()]}<small>${+d.slice(8)}</small></th>`).join('')}</tr></thead>
+      ${rows.map(r => `<tbody><tr><th colspan="${days.length}" scope="rowgroup">${esc(r.p.name)}${r.per > 1 ? ` <small>· 하루 ${r.per}번</small>` : r.per ? '' : ' <small>· 지금은 루틴에 없음</small>'}</th></tr><tr>${r.n.map((c, i) => cell(c, r.per, days[i])).join('')}</tr></tbody>`).join('')}</table>
+      ${help('✓ 먹음, 점은 기록 없음', '1/2 는 하루 2번 중 1번 먹은 날이에요. 하루 횟수는 지금 설정으로 봐서, 그 사이 새로 등록했거나 먹는 때를 바꾼 제품은 지난 날이 비거나 일부로 보일 수 있어요. 지운 제품은 나오지 않아요.')}`
+      : '<p class="muted">지난 7일 동안 챙긴 기록이 없어요.</p>'}
+    <div class="actions"><span class="grow"></span><button class="primary">닫기</button></div></form>`);
 }
 async function backupForm() {
   const key = await Promise.race([getKey(), new Promise(r => setTimeout(r, 2500, null))]);      // null = 저장소를 못 읽음 ('' = 키 없음). 저장소가 멈춰 있어도 창은 연다 — 백업 내보내기가 여기 있다
@@ -1123,6 +1156,7 @@ const ACT = {
     if (!o) return render();
     state.ack[d.k] = { sum: o.sum, ids: o.parts.map(([p]) => p.id) }; commit(); toast(`${NUTS[d.k][0]}: 더 늘거나 다른 제품이 더해지면 다시 알려요`);
   },
+  week() { refresh(); weekForm(); },
   backup() { backupForm(); },
   export() { exportAll().catch(() => toast('백업 파일을 만들지 못했어요', true)); },
   close() { shut(); },
@@ -1415,6 +1449,12 @@ function selfTest() {
     [{ vitd: { sum: 150, ids: ['a'] } }, {}, '비타민D 25㎍', '', 300, '비타민D 25㎍, 아연 8mg', '', ''], '정리: 알고 있어요 기록은 아는 영양소·양수 합계·있는 제품만 · 함량 글은 빈칸 정리·300자 · AI 답도 글만');
   ok(NUT_KEYS.every(k => AMT_PROMPT.includes(NUTS[k][0])) && !AMT_PROMPT.includes('${') && AMT_PROMPT.includes('분명히 적혀 있을 때만') && JSON.stringify(AMT_SCHEMA).length < 150,
     'AI 지시문: 영양소 이름이 다 들어감 · 하루 횟수는 분명할 때만 곱함 · 받을 틀은 글 한 칸');
+  // 지난 7일 기록
+  const wl = weekLog(cleanState({ items: [{ id: 'a', name: '둘', when: ['am', 'pm'] }, { id: 'b', name: '자동' }, { id: 'c', name: '뺌', off: true }, { id: 'd', name: '뺌·안 먹음', off: true }, { id: 'e', name: '지남', expiry: '2026-11-30' }, { id: 'f', name: '안 먹음' }],
+    ticks: { '2026-12-02': { am: ['a'] }, '2026-12-01': { am: ['a'], pm: ['a'], wake: ['b'] }, '2026-11-26': { am: ['c', 'e'] }, '2026-11-25': { am: ['b', 'd'] } } }), '2026-12-02');
+  eq([wl.days[0], wl.days[6], wl.rows.map(r => `${r.p.id}${r.per}:${r.n.join('')}`), weekMark(0, 2), weekMark(1, 2), weekMark(2, 2), weekMark(2, 1), weekMark(1, 0)],
+    ['2026-11-26', '2026-12-02', ['a2:0000021', 'b1:0000010', 'c0:1000000', 'e0:1000000', 'f1:0000000'], ['·', '기록 없음'], ['1/2', '2번 중 1번'], ['✓', '먹음'], ['✓', '먹음'], ['✓', '먹음']],
+    '지난 7일: 오늘까지 7일(달 넘김) · 루틴에 든 제품과 그 사이 ✓ 한 제품만(뺐거나 기한 지났어도, 8일 전 체크는 안 셈) · 다른 시간대에 한 체크도 셈 · 하루 두 번 중 한 번은 일부로');
   // 사용 기록
   const u = cleanUse({ since: '2026-11-20', n: { tick: [3, '2026-11-21'], applyMemo: [1, '2026-11-20'], applyWhen: [2, '2026-11-22'], bad: [0, 'x'], 'app:day': [2, '2026-11-22'], long: 'x' } });
   eq([Object.keys(u.n), useRows(u).rows, useName({ act: 'tab', tab: 'list', f: 'soon' }), useName({ act: 'check', fresh: '1' }), cleanUse(null).n],
