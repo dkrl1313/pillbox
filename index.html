@@ -122,6 +122,7 @@ input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(-
 form > label.pill, label.pill { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 38px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); cursor: pointer; }
 label.pill:has(:checked) { background: var(--soft); border-color: transparent; color: var(--accent); font-weight: 700; }
 .autonote, .stocknote { display: block; margin-top: 6px; }
+[data-act=swapAmt] { display: block; margin-top: 6px; }      /* 안내 글이 짧아도 글 옆에 붙지 않게 제 줄에 */
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 10px; }
 .actions { display: flex; gap: 8px; align-items: center; }
 .grow { flex: 1; }
@@ -266,9 +267,9 @@ const fmt = n => String(+n.toFixed(2));       // 25 · 8.5 · 0.33
 //   · 숫자 없이 이름만 이어 적은 것의 앞쪽: "칼슘 마그네슘 100mg" 의 칼슘, "비타민D 탄산칼슘 500mg" 의 비타민D, "칼슘 인 100mg" 의 칼슘
 //   · 이름과 숫자 사이에 다른 글이 낀 것: "칼슘은 500mg", "칼슘 30% 300mg", "마그네슘 1일 섭취량 300mg"
 // (11-23: 처음엔 「이름 뒤 24자 안의 첫 숫자」로 느슨하게 읽었다가, 검토마다 틀리게 읽는 표기가 새로 나와 엄격한 규칙 하나로 바꿨다 — 예외를 덧대는 쪽으로 되돌리지 말 것)
-const AMT = /^(?:\s|[:：]|\([^)]*\))*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(mcg|mg|㎎|㎍|µg|μg|ug|iu|g(?![a-z]))/i;
+const AMT = /^(?:\s|[:：]|\([^)]*\))*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(mcg|mg|㎎|㎍|µg|μg|ug|iu|g(?![a-z]))/di;      // d: 읽은 숫자의 자리(indices)도 받는다 — amtSwap 이 그 자리만 바꿔 쓴다
 const NUT_RE = Object.fromEntries(NUT_KEYS.map(k => [k, new RegExp(`(?<![a-z가-힣])(?:${NUTS[k][3].source})`, 'gi')]));
-function amountsOf(s) {
+function amountsOf(s, spans) {                // spans(빈 객체)를 주면 읽은 「숫자+단위」의 자리 { 영양소: [시작, 끝) } 도 적어 준다
   const out = {};
   if (typeof s !== 'string') return out;
   for (const k of NUT_KEYS) {
@@ -281,6 +282,7 @@ function amountsOf(s) {
       const ug = u === 'iu' ? iu * (unit === 'mg' ? 1000 : 1) : u === 'g' ? 1e6 : u === 'mg' || u === '㎎' ? 1000 : 1;
       if (!ug || !(n > 0)) continue;
       out[k] = n * ug / (unit === 'mg' ? 1000 : 1);
+      if (spans) spans[k] = [at.index + at[0].length + m.indices[1][0], at.index + at[0].length + m[0].length];
       break;
     }
   }
@@ -382,6 +384,18 @@ function amtAdd(had, got) {
   const text = `${had}, ${amountsText(more).replaceAll(' · ', ', ')}`;
   return amtNorm(text).length > 300 ? { why: 'full' } : { text, more };      // 저장할 때 300자에서 잘려 뒤쪽이 말없이 빠지지 않게
 }
+// 다시 읽은 함량 글(got)이 이미 적힌 글(had)과 값이 다른 영양소 → { text: 그 숫자 자리만 읽은 글자 그대로 바꾼 글, diff: { 영양소: [적힌 값, 읽은 값] } } · 다른 것이 없으면 null
+// amtAdd 는 적힌 값을 지키므로 틀린 값(한 통 전체 양 등)은 사진을 다시 찍어도 안 고쳐진다 — 저절로 덮지는 않고, 화면이 「읽은 값으로 바꾸기」 버튼을 내어 눌렀을 때만 바꾼다
+// ponytail: 바꾼 글이 300자를 넘는지는 여기서 안 본다 — 저장할 때의 300자 검사가 막는다(잘려 나가지 않는다)
+function amtSwap(had, got) {
+  const text = amtNorm(had), at = {}, gat = {}, have = amountsOf(text, at), add = amountsOf(got, gat);
+  const ks = NUT_KEYS.filter(k => k in have && k in add && Math.abs(have[k] - add[k]) > 1e-6);
+  if (!ks.length) return null;
+  const out = [...ks].sort((a, b) => at[b][0] - at[a][0]).reduce((t, k) => t.slice(0, at[k][0]) + got.slice(...gat[k]) + t.slice(at[k][1]), text), back = amountsOf(out);      // 뒤쪽 자리부터 바꾼다 — 앞쪽 자리가 밀리지 않게
+  // 바꾼 글을 다시 읽어, 바꾼 영양소는 읽은 값·나머지는 전과 같을 때만 내놓는다 — 자리가 어긋나는 표기(괄호 속 괄호로 두 영양소가 한 숫자를 읽음 · 단위에 글자가 붙음)면 바꾸기를 내지 않는다
+  return NUT_KEYS.every(k => Math.abs((back[k] ?? -1) - ((ks.includes(k) ? add[k] : have[k]) ?? -1)) < 1e-6) ? { text: out, diff: Object.fromEntries(ks.map(k => [k, [have[k], add[k]]])) } : null;
+}
+const swapNote = diff => `적힌 값과 다르게 읽었어요 — ${Object.entries(diff).map(([k, [a, b]]) => `${NUTS[k][0]} ${fmt(a)}${NUTS[k][2]} → ${fmt(b)}${NUTS[k][2]}`).join(' · ')}`;
 const date = v => {                           // 2/30 같은 없는 날짜는 버린다 (Date.parse 는 브라우저마다 달라 직접 되짚는다)
   const m = typeof v === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
   return m && ymd(new Date(m[1], m[2] - 1, m[3])) === v ? v : '';
@@ -430,7 +444,7 @@ const USE_NAMES = {
   copyRoutine: '루틴 글로 복사', 'form:advice': '다른 AI 답 붙여 넣기',
   tick: '먹었어요 체크', week: '지난 7일 기록 보기', 'form:item:new': '제품 등록', 'form:item:edit': '제품 고치기', 'pick:item': '사진으로 제품 칸 채우기', delItem: '다 먹었어요·삭제',
   'filter:out': '걸러 보기', 'filter:soon': '걸러 보기', 'filter:none': '걸러 보기', 'tab:soon': '기한 지난 제품 보러 가기', search: '제품 찾기',
-  'pick:amounts': '사진으로 하루 함량 채우기', fixAmt: '상한 안내에서 함량 고치기', offItem: '상한 안내에서 제품 빼기', ackOver: '상한 안내 「알고 있어요」',
+  'pick:amounts': '사진으로 하루 함량 채우기', fixAmt: '상한 안내에서 함량 고치기', swapAmt: '사진에서 읽은 값으로 함량 바꾸기', offItem: '상한 안내에서 제품 빼기', ackOver: '상한 안내 「알고 있어요」',
   export: '백업 내보내기', 'pick:backup': '백업 가져오기', vanityKey: '화장대 키 가져오기',
 };
 // 표에 쓸 모양으로: 쓴 기능(많이 쓴 순 [이름, 횟수, 마지막 날])과 아직 안 쓴 기능 이름
@@ -757,7 +771,8 @@ function itemForm(p, fresh) {                 // fresh = 사진에서 읽어 미
     <fieldset aria-label="하루 함량">${help('하루 함량 — 겹쳐서 상한을 넘으면 알려요', `라벨의 영양·기능 정보 표에 적힌 하루 섭취량 기준 함량이에요. 루틴의 제품을 모두 더해 성인 상한 섭취량을 넘으면 오늘 화면에서 알려요(식사로 먹는 양은 세지 못해요). 먹는 때를 여러 개 골랐어도 한 번 양이 아니라 하루 전체 양을 적어요. 세는 영양소: ${NUT_KEYS.map(k => NUTS[k][0]).join('·')}. 못 읽은 성분은 세지 못하니 아래 「읽은 것」을 확인해 주세요.`)}
       <textarea name="amounts" rows="2" maxlength="300" placeholder="예: 비타민D 25㎍, 아연 8.5mg" aria-label="하루 함량">${esc(p.amounts)}</textarea>
       <label class="btn"><input type="file" accept="image/*" class="sr" data-pick="amounts">📷 영양성분표 사진으로 채우기 (AI)</label>
-      <small class="amtnote" role="status">${esc(amtNote(p))}</small></fieldset>
+      <small class="amtnote" role="status">${esc(amtNote(p))}</small>
+      <button type="button" data-act="swapAmt" hidden>읽은 값으로 바꾸기</button></fieldset>
     <label>메모 <textarea name="memo" rows="2" maxlength="300">${esc(p.memo)}</textarea></label>
     <div class="actions">${isNew ? (more ? '<button type="button" data-act="skip">건너뛰기</button>' : '') : `<button type="button" class="danger" data-act="delItem" data-id="${esc(p.id)}">다 먹었어요·삭제</button>`}<span class="grow"></span>
       <button type="button" data-act="close">취소</button><button class="primary">저장</button></div></form>`);
@@ -1051,9 +1066,10 @@ function readGemini(r) {
 }
 // 영양성분표 사진 → 이 창의 하루 함량 칸을 채운다 (읽은 것이 있을 때만 바꾼다). 사진은 저장하지 않는다
 async function fillAmounts(form, file) {
-  const out = form.querySelector('.amtnote'), box = form.elements.amounts, lock = form.querySelectorAll('[data-pick], .primary');
+  const out = form.querySelector('.amtnote'), box = form.elements.amounts, lock = form.querySelectorAll('[data-pick], .primary'), btn = form.querySelector('[data-act=swapAmt]');
   const live = () => form.isConnected && dlg.open;
   for (const el of lock) el.disabled = true;
+  btn.hidden = true;                          // 앞서 읽은 사진의 「바꾸기」는 거둔다
   try {
     const key = await getKey();
     if (!live()) return;
@@ -1063,10 +1079,12 @@ async function fillAmounts(form, file) {
     const got = await readAmounts(await shrink(file, 2048, .85), key);
     if (!live()) return;
     const add = amtAdd(box.value.trim(), got);
-    if (!add.text) return void (out.textContent = { none: '표에서 세는 영양소를 찾지 못했어요. 영양·기능 정보 표가 보이게 가까이 찍어 주세요.',
-      same: '새로 읽은 영양소가 없어요 — 이미 적힌 것은 그대로 뒀어요.', full: '칸이 꽉 차서 덧붙이지 못했어요 — 글을 줄인 뒤 다시 해 주세요.' }[add.why]);
-    box.value = add.text;
-    out.textContent = amtNote(readItem(form));
+    if (add.text) box.value = add.text;
+    // 이미 적힌 값과 다르게 읽은 영양소가 있으면 알리고 「읽은 값으로 바꾸기」를 낸다 — 버튼은 읽은 글(got)만 들고 있다가 누를 때 다시 센다(ACT.swapAmt)
+    const swap = amtSwap(box.value, got);
+    out.textContent = [add.text ? amtNote(readItem(form)) : { none: '표에서 세는 영양소를 찾지 못했어요. 영양·기능 정보 표가 보이게 가까이 찍어 주세요.',
+      same: swap ? '' : '새로 읽은 영양소가 없어요 — 이미 적힌 것은 그대로 뒀어요.', full: '칸이 꽉 차서 덧붙이지 못했어요 — 글을 줄인 뒤 다시 해 주세요.' }[add.why], swap && swapNote(swap.diff)].filter(Boolean).join(' · ');
+    btn.dataset.got = got; btn.hidden = !swap;
   } catch (e) { if (live()) out.textContent = e.message; }
   finally { for (const el of lock) el.disabled = false; }
 }
@@ -1175,6 +1193,13 @@ const ACT = {
     applied(d, `✓ ${CHECK_WHEN[d.when]} 바꿨어요`); toast(`‘${p.name}’을(를) ${CHECK_WHEN[d.when]} 바꿨어요`);
   },
   fixAmt(d) { ACT.editItem(d); dlg.querySelector('form[data-form=item] [name=amounts]')?.focus(); },      // 상한 안내의 「함량 고치기」: 그 제품의 고치기 창을 하루 함량 칸에서 연다
+  swapAmt(d) {                                // 「읽은 값으로 바꾸기」: 칸의 글만 바꾼다(저장은 창의 「저장」) — 지금 칸에 적힌 글로 다시 센다
+    const f = dlg.querySelector('form[data-form=item]'), s = f && amtSwap(f.elements.amounts.value, d.got ?? '');
+    if (!f) return;
+    if (s) f.elements.amounts.value = s.text;
+    f.querySelector('[data-act=swapAmt]').hidden = true;
+    f.querySelector('.amtnote').textContent = amtNote(readItem(f));
+  },
   offItem(d) {                                // 상한 안내의 「빼기」: 그 제품을 루틴에 안 넣음으로 (제품을 열면 다시 넣을 수 있다)
     const p = item(d.id); if (!p) return;
     p.off = true; commit(); toast(`‘${p.name}’을(를) 루틴에서 뺐어요 — 제품을 열면 다시 넣을 수 있어요`);
@@ -1220,7 +1245,7 @@ dlg.addEventListener('input', e => {          // 제품 창: 이름으로 종류
   const cur = readItem(f);
   f.querySelector('.autonote').textContent = autoNote(cur);
   f.querySelector('.stocknote').textContent = stockNote(cur);
-  if (t.name === 'amounts') f.querySelector('.amtnote').textContent = amtNote(cur);      // 사진을 읽는 중의 안내를 다른 칸 입력이 지우지 않게, 이 칸을 고칠 때만
+  if (t.name === 'amounts') { f.querySelector('.amtnote').textContent = amtNote(cur); f.querySelector('[data-act=swapAmt]').hidden = true; }      // 사진을 읽는 중의 안내를 다른 칸 입력이 지우지 않게, 이 칸을 고칠 때만 (안내가 바뀌니 「바꾸기」도 거둔다)
 });
 dlg.addEventListener('change', e => {         // 사진·백업 파일 고르기
   const t = e.target, file = t.files?.[0];
@@ -1489,6 +1514,15 @@ function selfTest() {
     AA('가'.repeat(292), '아연 8mg')[0].length, AA('가'.repeat(293), '아연 8mg')],
     [['비타민D 25㎍, 아연 8mg', '비타민D 25㎍ · 아연 8mg'], ['비타민D 25㎍, 아연 8mg', '아연 8mg'], ['메모, 아연 8mg', '아연 8mg'], 'same', 'same', 'none', 'none', 300, 'full'],
     '사진 함량 더하기: 빈 칸이면 읽은 글 그대로 · 이미 적힌 영양소는 두고 없는 것만 덧붙임(줄로 나뉘어 적혀 있어도) · 새 것 없음·읽은 것 없음은 그대로 · 300자까지만');
+  const AS = (h, g) => { const r = amtSwap(h, g); return r && [r.text, swapNote(r.diff)]; };
+  eq([AS('엽산 24,000㎍, 비타민B6 45mg, 비타민D 750㎍', '엽산 800㎍, 비타민B6 1.5mg, 비타민D 1000IU'), AS('이노시톨 4000mg, 엽산(Folate) : 24,000 ㎍ 100%, 아연 8mg', '아연 8mg, 엽산 800㎍'), AS('아연 8mg\n칼슘\n300mg', '칼슘 500mg'),
+    AS('비타민D 25㎍', '비타민D 1000IU, 아연 8mg'), AS('', '아연 8mg'), AS('메모', '아연 8mg'), AS('아연 8mg', ''), AS('탄산칼슘 1250mg', '칼슘 500mg'),
+    AS('엽산 800㎍ 엽산 400㎍', '엽산 400㎍')?.[0], AS('칼슘(마그네슘(x) 300mg)', '칼슘 100mg, 마그네슘 250mg'), AS('칼슘 300mgx', '칼슘 1g')],
+    [['엽산 800㎍, 비타민B6 1.5mg, 비타민D 1000IU', '적힌 값과 다르게 읽었어요 — 비타민D 750㎍ → 25㎍ · 비타민B6 45mg → 1.5mg · 엽산 24000㎍ → 800㎍'], ['이노시톨 4000mg, 엽산(Folate) : 800㎍ 100%, 아연 8mg', '적힌 값과 다르게 읽었어요 — 엽산 24000㎍ → 800㎍'],
+      ['아연 8mg, 칼슘 500mg', '적힌 값과 다르게 읽었어요 — 칼슘 300mg → 500mg'], null, null, null, null, null, '엽산 400㎍ 엽산 400㎍', null, null],
+    '읽은 값으로 바꾸기: 값이 다른 영양소의 숫자 자리만 읽은 글자로(다른 글·같은 값은 그대로, 줄로 나뉜 글은 정리한 글에서) · 단위가 달라도 같은 양이면 다르지 않음 · 못 읽는 표기는 건드리지 않음 · 같은 이름이 둘이면 읽히는 첫째만 · 바꾼 글을 다시 읽어 어긋나면 내놓지 않음');
+  ok(amountsOf(amtSwap('마그네슘 480mg', '마그네슘 240mg').text).magnesium === 240 && /amtSwap\(f\.elements\.amounts\.value, d\.got/.test(ACT.swapAmt) && itemForm.toString().includes('data-act="swapAmt" hidden'),
+    '읽은 값으로 바꾸기: 바꾼 글을 다시 읽으면 읽은 값 · 버튼은 누를 때 지금 칸의 글로 다시 셈 · 창을 열 때는 숨겨 둠');
   ok(/items\.length < 2 \? await/.test(fillFromPhoto), '제품 사진의 함량: 사진 속 제품이 둘 이상이면 쓰지 않음(어느 제품의 표인지 알 수 없다) — 이 조건을 고치면 이 줄도 같이');
   // 지난 7일 기록
   const wl = weekLog(cleanState({ items: [{ id: 'a', name: '둘', when: ['am', 'pm'] }, { id: 'b', name: '자동' }, { id: 'c', name: '뺌', off: true }, { id: 'd', name: '뺌·안 먹음', off: true }, { id: 'e', name: '지남', expiry: '2026-11-30' }, { id: 'f', name: '안 먹음' }],
